@@ -39,6 +39,7 @@ import android.preference.PreferenceManager;
 import android.provider.ContactsContract.Contacts;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.TaskStackBuilder;
+import android.text.format.DateUtils;
 import android.text.Html;
 import android.util.DisplayMetrics;
 import android.view.LayoutInflater;
@@ -51,6 +52,7 @@ public class UIHelper {
 	private static final int BG_COLOR = 0xFF181818;
 	private static final int FG_COLOR = 0xFFE5E5E5;
 	private static final int TRANSPARENT = 0x00000000;
+    private static final int DATE_NO_YEAR_FLAGS = DateUtils.FORMAT_SHOW_DATE | DateUtils.FORMAT_NO_YEAR | DateUtils.FORMAT_ABBREV_ALL;
 
 	public static String readableTimeDifference(Context context, long time) {
 		if (time == 0) {
@@ -66,21 +68,23 @@ public class UIHelper {
 			SimpleDateFormat sdf = new SimpleDateFormat("HH:mm",Locale.US);
 			return sdf.format(date);
 		} else {
-			SimpleDateFormat sdf = new SimpleDateFormat("MM/dd",Locale.US);
-			return sdf.format(date);
+			return DateUtils.formatDateTime(context, date.getTime(), DATE_NO_YEAR_FLAGS);
 		}
 	}
 	
 	public static String lastseen(Context context, long time) {
+		if (time==0) {
+			return context.getString(R.string.never_seen);
+		}
 		long difference = (System.currentTimeMillis() - time) / 1000;
 		if (difference < 60) {
-			return context.getString(R.string.just_now);
-		} else if (difference < 60 * 60) {
-			return difference / 60 + " " + context.getString(R.string.mins);
-		} else if (difference < 60 * 60 * 24) {
-			return difference / (60 * 60)+ " " + context.getString(R.string.hours);
+			return context.getString(R.string.last_seen_now);
+		} else if (difference < 60 * 90) {
+			return context.getString(R.string.last_seen_mins,difference/60);
+		} else if (difference < 60 * 60 * 36) {
+			return context.getString(R.string.last_seen_hours,difference/(60*60));
 		} else {
-			return "days";
+			return context.getString(R.string.last_seen_days,difference/(60*60*24));
 		}
 	}
 

@@ -13,13 +13,10 @@ import eu.siacs.conversations.services.XmppConnectionService;
 import eu.siacs.conversations.xml.Element;
 import eu.siacs.conversations.xmpp.stanzas.MessagePacket;
 
-public class MessageParser {
-
-	protected static final String LOGTAG = "xmppService";
-	private XmppConnectionService mXmppConnectionService;
+public class MessageParser extends AbstractParser {
 
 	public MessageParser(XmppConnectionService service) {
-		this.mXmppConnectionService = service;
+		super(service);
 	}
 
 	public Message parseChat(MessagePacket packet, Account account) {
@@ -27,7 +24,7 @@ public class MessageParser {
 		Conversation conversation = mXmppConnectionService
 				.findOrCreateConversation(account, fromParts[0], false);
 		conversation.setLatestMarkableMessageId(getMarkableMessageId(packet));
-		updateLastseen(packet, account);
+		updateLastseen(packet, account,true);
 		String pgpBody = getPgpBody(packet);
 		if (pgpBody != null) {
 			return new Message(conversation, packet.getFrom(), pgpBody,
@@ -45,7 +42,7 @@ public class MessageParser {
 		String[] fromParts = packet.getFrom().split("/");
 		Conversation conversation = mXmppConnectionService
 				.findOrCreateConversation(account, fromParts[0], false);
-		updateLastseen(packet, account);
+		updateLastseen(packet, account,true);
 		String body = packet.getBody();
 		if (!conversation.hasValidOtrSession()) {
 			if (properlyAddressed) {
@@ -83,7 +80,6 @@ public class MessageParser {
 			body = otrSession.transformReceiving(body);
 			SessionStatus after = otrSession.getSessionStatus();
 			if ((before != after) && (after == SessionStatus.ENCRYPTED)) {
-				Log.d(LOGTAG, "otr session etablished");
 				List<Message> messages = conversation.getMessages();
 				for (int i = 0; i < messages.size(); ++i) {
 					Message msg = messages.get(i);
@@ -101,7 +97,6 @@ public class MessageParser {
 				mXmppConnectionService.updateUi(conversation, false);
 			} else if ((before != after) && (after == SessionStatus.FINISHED)) {
 				conversation.resetOtrSession();
-				Log.d(LOGTAG, "otr session stoped");
 			}
 			// isEmpty is a work around for some weird clients which send emtpty
 			// strings over otr
@@ -109,8 +104,10 @@ public class MessageParser {
 				return null;
 			}
 			conversation.setLatestMarkableMessageId(getMarkableMessageId(packet));
-			return new Message(conversation, packet.getFrom(), body,
+			Message finishedMessage = new Message(conversation, packet.getFrom(), body,
 					Message.ENCRYPTION_OTR, Message.STATUS_RECIEVED);
+			finishedMessage.setTime(getTimestamp(packet));
+			return finishedMessage;
 		} catch (Exception e) {
 			conversation.resetOtrSession();
 			return null;
@@ -144,13 +141,16 @@ public class MessageParser {
 		}
 		String pgpBody = getPgpBody(packet);
 		conversation.setLatestMarkableMessageId(getMarkableMessageId(packet));
+		Message finishedMessage;
 		if (pgpBody == null) {
-			return new Message(conversation, counterPart, packet.getBody(),
+			finishedMessage = new Message(conversation, counterPart, packet.getBody(),
 					Message.ENCRYPTION_NONE, status);
 		} else {
-			return new Message(conversation, counterPart, pgpBody,
+			finishedMessage=  new Message(conversation, counterPart, pgpBody,
 					Message.ENCRYPTION_PGP, status);
 		}
+		finishedMessage.setTime(getTimestamp(packet));
+		return finishedMessage;
 	}
 
 	public Message parseCarbonMessage(MessagePacket packet, Account account) {
@@ -174,7 +174,7 @@ public class MessageParser {
 			return null; // either malformed or boring
 		if (status == Message.STATUS_RECIEVED) {
 			fullJid = message.getAttribute("from");
-			updateLastseen(message, account);
+			updateLastseen(message, account,true);
 		} else {
 			fullJid = message.getAttribute("to");
 		}
@@ -183,20 +183,43 @@ public class MessageParser {
 				.findOrCreateConversation(account, parts[0], false);
 		conversation.setLatestMarkableMessageId(getMarkableMessageId(packet));
 		String pgpBody = getPgpBody(message);
+		Message finishedMessage;
 		if (pgpBody != null) {
-			return new Message(conversation, fullJid, pgpBody,
-					Message.ENCRYPTION_PGP, status);
+			finishedMessage = new Message(conversation, fullJid, pgpBody,Message.ENCRYPTION_PGP, status);
 		} else {
 			String body = message.findChild("body").getContent();
-			return new Message(conversation, fullJid, body,
-					Message.ENCRYPTION_NONE, status);
+			finishedMessage=  new Message(conversation, fullJid, body,Message.ENCRYPTION_NONE, status);
 		}
+		finishedMessage.setTime(getTimestamp(message));
+		return finishedMessage;
 	}
 
 	public void parseError(MessagePacket packet, Account account) {
 		String[] fromParts = packet.getFrom().split("/");
 		mXmppConnectionService.markMessage(account, fromParts[0],
 				packet.getId(), Message.STATUS_SEND_FAILED);
+	}
+	
+	public void parseNormal(MessagePacket packet, Account account) {
+		if (packet.hasChild("displayed","urn:xmpp:chat-markers:0")) {
+			String id = packet.findChild("displayed","urn:xmpp:chat-markers:0").getAttribute("id");
+			String[] fromParts = packet.getFrom().split("/");
+			updateLastseen(packet, account,true);
+			mXmppConnectionService.markMessage(account,fromParts[0], id, Message.STATUS_SEND_DISPLAYED);
+		} else if (packet.hasChild("received","urn:xmpp:chat-markers:0")) {
+			String id = packet.findChild("received","urn:xmpp:chat-markers:0").getAttribute("id");
+			String[] fromParts = packet.getFrom().split("/");
+			updateLastseen(packet, account,false);
+			mXmppConnectionService.markMessage(account,fromParts[0], id, Message.STATUS_SEND_RECEIVED);
+		} else if (packet.hasChild("x")) {
+			Element x = packet.findChild("x");
+			if (x.hasChild("invite")) {
+				Conversation conversation = mXmppConnectionService.findOrCreateConversation(account, packet.getFrom(),
+						true);
+				mXmppConnectionService.updateUi(conversation, false);
+			}
+
+		}
 	}
 
 	private String getPgpBody(Element message) {
@@ -215,23 +238,6 @@ public class MessageParser {
 			return null;
 		}
 	}
+
 	
-	private void updateLastseen(Element message, Account account) {
-		String[] fromParts = message.getAttribute("from").split("/");
-		String from = fromParts[0];
-		String presence = null;
-		if (fromParts.length >= 2) {
-			presence = fromParts[1];
-		}
-		Contact contact = account.getRoster().getContact(from);
-		if (presence!=null) {
-			contact.lastseen.presence = presence;
-			contact.lastseen.time = System.currentTimeMillis();
-		} else if ((contact.getPresences().size() == 1)&&(contact.getPresences().containsKey(contact.lastseen.presence))) {
-			contact.lastseen.time = System.currentTimeMillis();
-		} else {
-			contact.lastseen.presence = null;
-			contact.lastseen.time = System.currentTimeMillis();
-		}
-	}
 }
