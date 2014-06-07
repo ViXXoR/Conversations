@@ -84,10 +84,19 @@ public class ContactsActivity extends XmppActivity {
 				menu.findItem(R.id.action_invite).setVisible(false);
 				menu.findItem(R.id.action_invite_to_existing).setVisible(false);
 			} else if ((selectedContacts.size() == 1) && (!inviteIntent)) {
-				menu.findItem(R.id.action_start_conversation).setVisible(true);
-				menu.findItem(R.id.action_contact_details).setVisible(true);
-				menu.findItem(R.id.action_invite).setVisible(false);
-				menu.findItem(R.id.action_invite_to_existing).setVisible(true);
+				// We can't look at contact details if we're searching for a contact,
+				// so let's make sure this is a valid contact first
+				if(selectedContacts.get(0).getAccount() != null) {
+					menu.findItem(R.id.action_start_conversation).setVisible(true);
+					menu.findItem(R.id.action_contact_details).setVisible(true);
+					menu.findItem(R.id.action_invite).setVisible(false);
+					menu.findItem(R.id.action_invite_to_existing).setVisible(true);
+				} else {
+					menu.findItem(R.id.action_start_conversation).setVisible(true);
+					menu.findItem(R.id.action_contact_details).setVisible(false);
+					menu.findItem(R.id.action_invite).setVisible(false);
+					menu.findItem(R.id.action_invite_to_existing).setVisible(false);
+				}
 			} else if (!inviteIntent) {
 				menu.findItem(R.id.action_start_conversation).setVisible(true);
 				menu.findItem(R.id.action_contact_details).setVisible(false);
